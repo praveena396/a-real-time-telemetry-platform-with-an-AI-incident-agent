@@ -41,6 +41,9 @@ class BatchedWriter:
         self.flush_latencies: list[float] = []  # seconds, kept for benchmarks
         self._backoff = 0.0
         self._retry_at = 0.0
+        # Create the labelled series up front so alerts see 0 rather than "no data".
+        for m in (DB_FAILURES, DB_ROWS, DB_ROWS_DROPPED):
+            m.labels(name)
 
     async def run(self) -> None:
         deadline = time.monotonic() + self.flush_interval

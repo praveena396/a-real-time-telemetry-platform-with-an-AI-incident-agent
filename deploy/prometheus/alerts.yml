@@ -1,0 +1,62 @@
+groups:
+  - name: telemetry-sentinel
+    rules:
+      - alert: SentinelDown
+        expr: up{job="sentinel"} == 0
+        for: 15s
+        labels: {severity: critical}
+        annotations:
+          summary: "Sentinel API is not being scraped"
+
+      - alert: NoTelemetry
+        expr: rate(sentinel_bus_published_total[1m]) == 0
+        for: 30s
+        labels: {severity: critical}
+        annotations:
+          summary: "No events published on the bus for 30s"
+
+      - alert: EventsDropped
+        expr: sum by (subscriber) (increase(sentinel_bus_dropped_total{subscriber!="ws"}[1m])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "Bus subscriber {{ $labels.subscriber }} is dropping events (drop-oldest backpressure)"
+
+      - alert: DatabaseWritesFailing
+        expr: sum by (table) (increase(sentinel_db_write_failures_total[1m])) > 0
+        for: 10s
+        labels: {severity: critical}
+        annotations:
+          summary: "Writes to {{ $labels.table }} are failing; rows are buffering in memory"
+
+      - alert: DatabaseRowsLost
+        expr: sum by (table) (increase(sentinel_db_rows_dropped_total[5m])) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "Writer buffer for {{ $labels.table }} overflowed; rows were discarded"
+
+      - alert: DatabaseWriteLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(sentinel_db_write_seconds_bucket[2m]))) > 0.25
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "p95 batch write latency above 250 ms"
+
+      - alert: QueueBackingUp
+        expr: max by (subscriber) (sentinel_bus_queue_fill_ratio{subscriber!="ws"}) > 0.8
+        for: 30s
+        labels: {severity: warning}
+        annotations:
+          summary: "Queue for {{ $labels.subscriber }} is over 80% full"
+
+      - alert: DetectionLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(sentinel_detection_latency_seconds_bucket[2m]))) > 0.05
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "p95 detection latency above 50 ms"
+
+      - alert: ApprovalBacklog
+        expr: sum(increase(sentinel_proposals_total{outcome="created"}[15m])) - sum(increase(sentinel_proposals_total{outcome=~"approved|rejected"}[15m])) > 10
+        labels: {severity: info}
+        annotations:
+          summary: "More than 10 agent proposals waiting for a human"
