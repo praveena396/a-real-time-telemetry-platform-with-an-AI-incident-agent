@@ -72,6 +72,7 @@ class Store(Protocol):
     async def audit(self, event: str, actor: str, proposal_id: str | None = None,
                     details: dict[str, Any] | None = None) -> None: ...
     async def list_audit(self, limit: int = 200) -> list[dict[str, Any]]: ...
+    async def ping(self) -> bool: ...
     async def close(self) -> None: ...
 
 
@@ -169,6 +170,9 @@ class MemoryStore:
 
     async def list_audit(self, limit: int = 200) -> list[dict[str, Any]]:
         return list(reversed(self.audit_log[-limit:]))
+
+    async def ping(self) -> bool:
+        return True
 
     async def close(self) -> None:
         return None

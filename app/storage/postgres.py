@@ -86,6 +86,13 @@ class PgStore:
     async def close(self) -> None:
         await self.pool.close()
 
+    async def ping(self) -> bool:
+        try:
+            await self.pool.fetchval("SELECT 1", timeout=1.0)
+            return True
+        except (OSError, asyncpg.PostgresError, TimeoutError):
+            return False
+
     # --- hot path: COPY is far faster than INSERT for batches ---
     async def write_readings(self, rows: list[Reading]) -> None:
         async with self.pool.acquire() as conn:
