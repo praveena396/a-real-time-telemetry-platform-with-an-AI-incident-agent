@@ -34,6 +34,7 @@ def anomaly_row(a: Anomaly) -> dict[str, Any]:
 def incident_row(i: Incident) -> dict[str, Any]:
     d = asdict(i)
     d["metrics"] = list(i.metrics)
+    d["labels"] = list(i.labels)
     d["samples"] = [list(s) for s in i.samples]
     return d
 

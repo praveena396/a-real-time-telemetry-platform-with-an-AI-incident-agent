@@ -19,16 +19,21 @@ from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocket
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..config import Settings
 from ..events import Event
 from ..metrics import WS_CLIENTS, WS_SENT
 from ..runtime import Pipeline
 from ..simulator import BASELINES, FAULT_KINDS
-from ..storage.base import MemoryStore, Store
+from ..storage.base import InvalidTransitionError, MemoryStore, NotFoundError, Store
 
 log = logging.getLogger(__name__)
+
+
+class DecisionIn(BaseModel):
+    actor: str = Field(min_length=1, max_length=100)
+    note: str | None = Field(default=None, max_length=1000)
 
 
 class FaultIn(BaseModel):
@@ -137,9 +142,50 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                 "fault_kinds": FAULT_KINDS, "detector": settings.detector,
                 "devices": sorted(pipe(request).fleet.devices)}
 
+    # ---------------- incidents, proposals, approvals, audit ----------------
+    @app.get("/api/incidents")
+    async def incidents(request: Request, limit: int = Query(100, gt=0, le=1000)) -> list[dict[str, Any]]:
+        return [{k: v for k, v in i.items() if k not in ("truth", "labels")}
+                for i in await db(request).list_incidents(limit)]
+
+    @app.get("/api/incidents/{incident_id}")
+    async def incident(request: Request, incident_id: str) -> dict[str, Any]:
+        try:
+            return await db(request).get_incident(incident_id)
+        except NotFoundError:
+            raise HTTPException(404, "incident not found") from None
+
+    @app.get("/api/proposals")
+    async def proposals(request: Request, status: str | None = None,
+                        limit: int = Query(100, gt=0, le=1000)) -> list[dict[str, Any]]:
+        return await db(request).list_proposals(status, limit)
+
+    async def decide(request: Request, proposal_id: str, body: DecisionIn, approve: bool) -> dict[str, Any]:
+        ex = pipe(request).executor
+        try:
+            if approve:
+                return await ex.approve(proposal_id, body.actor, body.note)
+            return await ex.reject(proposal_id, body.actor, body.note)
+        except NotFoundError:
+            raise HTTPException(404, "proposal not found") from None
+        except InvalidTransitionError as e:
+            raise HTTPException(409, f"proposal already decided ({e})") from None
+
+    @app.post("/api/proposals/{proposal_id}/approve")
+    async def approve(request: Request, proposal_id: str, body: DecisionIn) -> dict[str, Any]:
+        return await decide(request, proposal_id, body, approve=True)
+
+    @app.post("/api/proposals/{proposal_id}/reject")
+    async def reject(request: Request, proposal_id: str, body: DecisionIn) -> dict[str, Any]:
+        return await decide(request, proposal_id, body, approve=False)
+
+    @app.get("/api/audit")
+    async def audit(request: Request, limit: int = Query(200, gt=0, le=5000)) -> list[dict[str, Any]]:
+        return await db(request).list_audit(limit)
+
     # ---------------- live stream ----------------
     @app.websocket("/ws")
-    async def stream(ws: WebSocket, types: str = "reading,anomaly,incident,proposal,actionexecuted",
+    async def stream(ws: WebSocket, types: str = "reading,anomaly,incident,proposal,proposalupdated,actionexecuted",
                      device: str | None = None) -> None:
         """Push events to one browser.
 

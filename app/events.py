@@ -44,6 +44,7 @@ class Incident(Event):
     # Majority ground-truth label of the grouped anomalies. Used only for
     # evaluation; the agent never sees it.
     truth: str | None = None
+    labels: tuple[str, ...] = ()  # every ground-truth fault kind present (evaluation only)
     samples: tuple[tuple[float, str, float, float], ...] = ()  # (ts, metric, value, score)
 
 
@@ -69,3 +70,11 @@ class ActionExecuted(Event):
     device_id: str
     action: str
     params: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ProposalUpdated(Event):
+    proposal_id: str
+    device_id: str
+    status: str
+    actor: str

@@ -63,3 +63,28 @@ def test_websocket_streams_filtered_events(client):
         h = client.get("/api/health").json()
         assert h["ws_clients"] == 1
     wait_for(lambda: client.get("/api/health").json()["ws_clients"] == 0)
+
+
+def test_end_to_end_fault_to_approved_action():
+    settings = Settings(database_url=None, devices=2, rate_hz=50, detector="hybrid", agent_enabled=True,
+                        incident_quiet_s=0.5, fault_scale=0.0)
+    with TestClient(create_app(settings, MemoryStore())) as c:
+        time.sleep(1.2)
+        c.post("/api/devices/dev-001/faults", json={"metric": "pressure", "kind": "drift"})
+        prop = wait_for(lambda: c.get("/api/proposals", params={"status": "pending"}).json(), timeout=10)[0]
+        assert prop["device_id"] == "dev-001" and prop["diagnosis"] == "drift"
+        assert prop["action"] == "recalibrate_sensor" and prop["params"] == {"metric": "pressure"}
+        inc = c.get(f"/api/incidents/{prop['incident_id']}").json()
+        assert "pressure" in inc["metrics"]
+        assert all("truth" not in i for i in c.get("/api/incidents").json())
+
+        r = c.post(f"/api/proposals/{prop['proposal_id']}/approve", json={"actor": "alice"})
+        assert r.status_code == 200 and r.json()["status"] == "executed"
+        again = c.post(f"/api/proposals/{prop['proposal_id']}/reject", json={"actor": "bob"})
+        assert again.status_code == 409
+        assert c.post("/api/proposals/nope/approve", json={"actor": "x"}).status_code == 404
+        assert c.post(f"/api/proposals/{prop['proposal_id']}/approve", json={"actor": ""}).status_code == 422
+        events = [a["event"] for a in c.get("/api/audit").json()]
+        assert events[:3] == ["action_executed", "proposal_approved", "proposal_created"]
+        assert "dev-001" in c.app.state.pipeline.fleet.devices
+        assert c.app.state.pipeline.fleet["dev-001"].actions == ["recalibrate_sensor"]
