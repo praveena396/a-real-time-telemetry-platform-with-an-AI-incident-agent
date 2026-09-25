@@ -8,7 +8,7 @@ Work through this list in order.
 - [ ] Clone the repo, run `pip install -r requirements-dev.txt`, `pytest`, `python -m app.main --seconds 30`.
 - [ ] Read `app/bus.py`, `app/detectors.py`, `app/storage/writer.py` and `app/agent/guardrails.py` until you can
       whiteboard each one from memory. Use [INTERVIEW.md](INTERVIEW.md) to test yourself.
-- [ ] Record your laptop specs (CPU, cores, RAM, OS) in the README's Results section.
+- [ ] Add your CPU model and RAM to the README's Results section (12 threads and Python 3.14.5 are already recorded).
 
 ## Phase 1: Detection (done). Your task: re-measure
 - [ ] `python -m app.compare --markdown` → paste your table into the README.
@@ -43,7 +43,8 @@ Work through this list in order.
 
 ## Phase 7: Engineering polish (mostly done). Your task
 - [ ] Push to GitHub and check the Actions tab: lint, mypy, tests against TimescaleDB, dashboard build, docker build.
-- [ ] Run `python -m app.loadtest` and `python -m app.loadtest --dsn ...` on your laptop. Put **your** capacity numbers in the README.
+- [x] Run `python -m app.loadtest` on your laptop: 85.9k events/s sustained, 0 drops.
+- [ ] Run `python -m app.loadtest --dsn ...` and `python -m app.bench_writer --dsn ...` on your laptop once Docker is installed.
 - [ ] Record a 2-minute demo video: inject drift → chart → incident → agent proposal → approve → audit log →
       stop the DB → alert fires → DB returns → no data lost. Link it at the top of the README.
 

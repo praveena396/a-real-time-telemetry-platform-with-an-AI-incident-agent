@@ -107,8 +107,13 @@ cd dashboard && npm install && npm run dev               # http://localhost:5173
 
 ## Results
 
-Measured in the development sandbox: 4 vCPU, Python 3.11, TimescaleDB 2.30 in Docker on the same
-host. **Re-run these on your own machine and replace the numbers.** See [docs/ROADMAP.md](docs/ROADMAP.md).
+Two machines:
+- **Laptop:** Windows, 12 CPU threads, Python 3.14.5, in-memory store.
+- **Sandbox:** Linux cloud VM, 4 vCPU, Python 3.11, TimescaleDB 2.30 in Docker on the same host.
+
+Detection quality is deterministic: the simulator is seeded, so precision and recall come out the
+same on every machine. Latency and capacity depend on the hardware. See
+[docs/ROADMAP.md](docs/ROADMAP.md) for the database measurements still to take on the laptop.
 
 **Detector comparison.** Command: `python -m app.compare --markdown`. Setup: 20 devices × 3,000 readings
 per metric, seed 7, benchmark fault rates. `episodes` = fraction of injected faults flagged at least once;
@@ -126,15 +131,21 @@ before the drift is large enough to cross it.
 
 **Pipeline**
 
-| measurement | result | command |
-|---|---|---|
-| Live run, 20 devices × 10 Hz × 3 metrics | 615 events/s, precision 0.98, recall 0.74, 0 drops | `python -m app.main --seconds 30` |
-| Detection latency (reading → anomaly) | p50 0.34 ms, p95 0.52 ms | same |
-| Sustainable capacity, detector only | **38.5k events/s**, 0 drops (1,275 devices) | `python -m app.loadtest` |
-| Sustainable capacity, detector + TimescaleDB writes | **23.0k events/s**, 0 drops (757 devices) | `python -m app.loadtest --dsn ...` |
-| Raw batched write throughput | 43.5k rows/s, flush p50 9.2 ms / p95 17.4 ms | `python -m app.bench_writer --dsn ...` |
-| WebSocket fan-out, 10 browsers | 613 events/s each, p95 lag 17 ms, 0 drops | `python -m app.ws_bench` |
-| DB outage (stop TimescaleDB) | alert fires in ~20 s; ~12k rows buffered, 0 lost on recovery | `docker compose stop db` |
+| measurement | result | machine | command |
+|---|---|---|---|
+| Live run, 20 devices × 10 Hz × 3 metrics | 615 events/s, precision 0.98, recall 0.74, 0 drops | both | `python -m app.main --seconds 30` |
+| Detection latency (reading → anomaly) | p50 0.29 ms, p95 0.90 ms | laptop | same |
+| Sustainable capacity, detector only | **85.9k events/s**, 0 drops (2,868 devices, one Python process) | laptop | `python -m app.loadtest` |
+| Sustainable capacity, detector only | 38.5k events/s, 0 drops (1,275 devices) | sandbox | same |
+| Sustainable capacity, detector + TimescaleDB writes | 23.0k events/s, 0 drops (757 devices) | sandbox | `python -m app.loadtest --dsn ...` |
+| Raw batched write throughput | 43.5k rows/s, flush p50 9.2 ms / p95 17.4 ms | sandbox | `python -m app.bench_writer --dsn ...` |
+| WebSocket fan-out, 10 browsers | 613 events/s each, p95 lag 17 ms, 0 drops | sandbox | `python -m app.ws_bench` |
+| DB outage (stop TimescaleDB) | alert fires in ~20 s; ~12k rows buffered, 0 lost on recovery | sandbox | `docker compose stop db` |
+
+Past 86k events/s the laptop run stops keeping up: at a 129k/s target it managed 98.8k/s, detector
+lag rose to 170 ms and nothing was dropped. The limit is one CPU core, since the whole asyncio
+pipeline runs on a single thread. Going further means running several processes, each handling a
+share of the devices.
 
 **Incident agent eval.** Command: `python -m app.agent.eval run`. Data: 247 recorded incidents with ground
 truth (158 spike, 59 drift, 24 stuck, 6 false alarms; 41 contain more than one fault).
