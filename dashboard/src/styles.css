@@ -1,0 +1,59 @@
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #1c2024; --muted: #6b7280; --border: #e3e6ea;
+  --accent: #2563eb; --ok: #1a7f52; --warn: #b7791f; --bad: #d4343a; --pending: #7c3aed;
+  color-scheme: light;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115; --panel: #171a21; --text: #e6e8eb; --muted: #9aa3ae; --border: #262b35;
+    --accent: #6ea8fe; --ok: #3fbf86; --warn: #e3b341; --bad: #ff6b6f; --pending: #a78bfa;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); }
+a { color: var(--accent); cursor: pointer; text-decoration: none; }
+header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; padding: 12px 20px;
+  background: var(--panel); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 2; }
+header h1 { font-size: 16px; margin: 0; }
+nav { display: flex; gap: 4px; flex-wrap: wrap; }
+nav a { color: var(--text); padding: 6px 10px; border-radius: 6px; }
+nav a.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.status { margin-left: auto; display: flex; gap: 14px; align-items: center; color: var(--muted); flex-wrap: wrap; }
+.status b { color: var(--text); font-weight: 600; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+main { padding: 20px; max-width: 1400px; margin: 0 auto; }
+h2 { font-size: 18px; margin: 0; } h3 { font-size: 15px; margin: 24px 0 8px; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.device { cursor: pointer; margin: 0; border-left: 4px solid var(--ok); transition: border-color .2s; }
+.device.alert { border-left-color: var(--bad); } .device.pending { border-left-color: var(--pending); }
+.device-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.metric-row { display: flex; justify-content: space-between; padding: 2px 0; font-variant-numeric: tabular-nums; }
+.pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 18%, transparent); white-space: nowrap; }
+.pill.ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.pill.alert { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
+.pill.pending { background: color-mix(in srgb, var(--pending) 18%, transparent); color: var(--pending); }
+.muted { color: var(--muted); } .small { font-size: 12px; } .bad { color: var(--bad); } .warn { color: var(--warn); }
+.toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.charts { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.faults { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.faults.compact { margin-top: 10px; } .faults.compact select, .faults.compact button { font-size: 12px; padding: 3px 6px; }
+button, select, input { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 10px; }
+button { background: var(--accent); color: white; border-color: var(--accent); cursor: pointer; }
+button.ghost { background: transparent; color: var(--text); border-color: var(--border); }
+button.danger { background: transparent; color: var(--bad); border-color: var(--bad); }
+button:disabled { opacity: .5; cursor: default; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; }
+.card:has(table) { overflow-x: auto; }
+.proposal .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.proposal .actions input { flex: 1; min-width: 160px; }
+.confidence { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 6px; }
+.confidence div { height: 100%; background: var(--accent); }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+@media (max-width: 640px) { main { padding: 12px 16px; } .status { margin-left: 0; } }

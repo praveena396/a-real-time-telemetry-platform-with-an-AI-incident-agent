@@ -20,7 +20,7 @@ from mcp.server.mcpserver import MCPServer
 
 from ..events import Proposal
 from ..storage.base import NotFoundError, Store
-from .guardrails import validate_proposal
+from .guardrails import NO_OP_ACTIONS, validate_proposal
 from .tools import AgentTools
 
 mcp = MCPServer(
@@ -99,11 +99,13 @@ async def propose_action(incident_id: str, diagnosis: str, cause: str, action: s
         return {"accepted": False, "errors": errors}
     p = Proposal(proposal_id=f"prop-{uuid.uuid4().hex[:12]}", incident_id=incident_id,
                  device_id=incident["device_id"], diagnosis=valid.diagnosis, cause=valid.cause,
-                 action=valid.action, params=valid.params, confidence=valid.confidence, agent="mcp")
+                 action=valid.action, params=valid.params, confidence=valid.confidence, agent="mcp",
+                 status="auto_closed" if valid.action in NO_OP_ACTIONS else "pending")
     await store.save_proposal(p)
     await store.audit("proposal_created", "mcp", p.proposal_id,
                       {"incident_id": incident_id, "diagnosis": p.diagnosis, "action": p.action})
-    return {"accepted": True, "proposal_id": p.proposal_id, "status": "pending human approval"}
+    return {"accepted": True, "proposal_id": p.proposal_id,
+            "status": "pending human approval" if p.status == "pending" else "auto-closed (no-op action)"}
 
 
 if __name__ == "__main__":

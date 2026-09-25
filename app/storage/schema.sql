@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS proposals (
     confidence  double precision NOT NULL,
     agent       text             NOT NULL,
     status      text             NOT NULL DEFAULT 'pending'
-                CHECK (status IN ('pending', 'approved', 'rejected', 'executed', 'failed')),
+                CHECK (status IN ('pending', 'approved', 'rejected', 'executed', 'failed', 'auto_closed')),
     created_at  timestamptz      NOT NULL DEFAULT now(),
     decided_at  timestamptz,
     decided_by  text,

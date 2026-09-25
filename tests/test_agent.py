@@ -217,8 +217,8 @@ async def test_agent_survives_diagnoser_crash_and_invalid_output():
 async def test_agent_rate_limit():
     store, inc = await seeded_store("spike")
     agent = IncidentAgent(store, HeuristicDiagnoser(), max_per_min=1)
-    assert await agent.handle(inc) is not None
-    await store.set_proposal_status((await store.list_proposals())[0]["proposal_id"], "rejected", "x")
+    first = await agent.handle(inc)
+    assert first is not None and first.status == "auto_closed"  # spike -> no_action, closed by policy
     assert await agent.handle(Incident(**{**inc.__dict__, "incident_id": "inc-2"})) is None
     assert (await store.list_audit())[0]["details"]["reason"] == "rate limit"
 
@@ -250,6 +250,17 @@ async def test_reject_does_not_execute():
     p = await IncidentAgent(store, HeuristicDiagnoser()).handle(inc)
     out = await ActionExecutor(store, fleet).reject(p.proposal_id, "alice", "false alarm")
     assert out["status"] == "rejected" and fleet["dev-000"].active_faults() == {"temperature": "stuck"}
+
+
+@pytest.mark.asyncio
+async def test_noop_proposals_skip_the_queue_and_dont_block_device():
+    store, inc = await seeded_store("spike")
+    agent = IncidentAgent(store, HeuristicDiagnoser())
+    p = await agent.handle(inc)
+    assert p.action == "no_action" and p.status == "auto_closed"
+    assert await store.list_proposals("pending") == []
+    assert (await store.list_audit())[0]["event"] == "proposal_auto_closed"
+    assert await agent.handle(Incident(**{**inc.__dict__, "incident_id": "inc-2"})) is not None
 
 
 # ---------------- MCP server ----------------

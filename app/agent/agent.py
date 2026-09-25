@@ -15,7 +15,7 @@ from ..events import Incident, Proposal
 from ..metrics import AGENT_LATENCY, PROPOSALS
 from ..storage.base import Store
 from .diagnosers import Diagnoser
-from .guardrails import validate_proposal
+from .guardrails import NO_OP_ACTIONS, validate_proposal
 from .tools import AgentTools
 
 log = logging.getLogger(__name__)
@@ -81,13 +81,16 @@ class IncidentAgent:
         p = Proposal(proposal_id=f"prop-{uuid.uuid4().hex[:12]}", incident_id=inc.incident_id,
                      device_id=inc.device_id, diagnosis=valid.diagnosis, cause=valid.cause,
                      action=valid.action, params=valid.params, confidence=valid.confidence,
-                     agent=self.diagnoser.name)
+                     agent=self.diagnoser.name,
+                     # No-op actions can't hurt anything: record them, but don't make a human approve them.
+                     status="auto_closed" if valid.action in NO_OP_ACTIONS else "pending")
         await self.store.save_proposal(p)
-        await self.store.audit("proposal_created", self.diagnoser.name, p.proposal_id,
+        await self.store.audit("proposal_created" if p.status == "pending" else "proposal_auto_closed",
+                               self.diagnoser.name, p.proposal_id,
                                {"incident_id": inc.incident_id, "diagnosis": p.diagnosis, "action": p.action,
                                 "params": p.params, "confidence": p.confidence,
                                 "tool_calls": result.tool_calls})
-        PROPOSALS.labels("created").inc()
+        PROPOSALS.labels("created" if p.status == "pending" else "auto_closed").inc()
         AGENT_LATENCY.observe(time.perf_counter() - t0)
         if self.bus and not self.bus.closed:
             self.bus.publish(p)

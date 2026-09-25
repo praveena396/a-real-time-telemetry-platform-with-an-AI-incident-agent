@@ -29,6 +29,10 @@ ALLOWED_ACTIONS: dict[str, set[str]] = {
     "no_action": set(),                   # transient event, nothing to do
 }
 
+# Actions that change nothing on a device. They are recorded but closed by
+# policy instead of waiting in the human approval queue.
+NO_OP_ACTIONS = {"no_action", "increase_monitoring"}
+
 # What a correct response to each ground-truth fault looks like (used by evals).
 EXPECTED_ACTIONS: dict[str, set[str]] = {
     "spike": {"no_action", "increase_monitoring"},

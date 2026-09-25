@@ -43,12 +43,12 @@ class ActionExecutor:
                 raise KeyError(f"unknown device {p['device_id']}")
             self.fleet[p["device_id"]].apply_action(p["action"], p["params"].get("metric"))
         except (ValueError, KeyError) as e:
-            p = await self.store.set_proposal_status(proposal_id, "failed", "system", str(e))
+            p = await self.store.set_proposal_status(proposal_id, "failed", actor, str(e))
             await self.store.audit("action_failed", "system", proposal_id, {"error": str(e)})
             self._publish(ProposalUpdated(proposal_id=proposal_id, device_id=p["device_id"],
                                           status="failed", actor="system"))
             return p
-        p = await self.store.set_proposal_status(proposal_id, "executed", "system", note)
+        p = await self.store.set_proposal_status(proposal_id, "executed", actor, note)
         await self.store.audit("action_executed", "system", proposal_id,
                                {"action": p["action"], "params": p["params"], "device_id": p["device_id"]})
         PROPOSALS.labels("executed").inc()
