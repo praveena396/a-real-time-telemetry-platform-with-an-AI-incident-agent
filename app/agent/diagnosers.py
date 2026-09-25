@@ -132,7 +132,7 @@ class GeminiClient:
 
     URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
-    def __init__(self, api_key: str, model: str = DEFAULT_GEMINI_MODEL, timeout: float = 60.0,
+    def __init__(self, api_key: str, model: str = DEFAULT_GEMINI_MODEL, timeout: float = 120.0,
                  max_rpm: float | None = None, max_attempts: int = 6) -> None:
         self.model = model
         self.http = httpx.AsyncClient(timeout=timeout, headers={"x-goog-api-key": api_key})
@@ -169,7 +169,13 @@ class GeminiClient:
                 "generationConfig": {"temperature": 0}}
         for attempt in range(self.max_attempts):
             await self._pace()
-            r = await self.http.post(self.URL.format(model=self.model), json=body)
+            try:
+                r = await self.http.post(self.URL.format(model=self.model), json=body)
+            except httpx.TimeoutException:
+                if attempt == self.max_attempts - 1:
+                    raise
+                log.warning("Gemini timed out; retrying")
+                continue
             if r.status_code in (429, 500, 503) and attempt < self.max_attempts - 1:
                 wait = self._retry_after(r, attempt)
                 log.warning("Gemini %s; retrying in %.0fs", r.status_code, wait)

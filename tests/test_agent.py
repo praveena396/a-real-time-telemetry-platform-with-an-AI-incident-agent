@@ -371,3 +371,22 @@ async def test_gemini_client_paces_requests():
     for _ in range(3):
         await client.generate("s", [], [])
     assert asyncio.get_running_loop().time() - t0 >= 0.19
+
+
+@pytest.mark.asyncio
+async def test_gemini_client_retries_timeouts():
+    import httpx
+
+    from app.agent.diagnosers import GeminiClient
+
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        if len(calls) == 1:
+            raise httpx.ReadTimeout("slow", request=request)
+        return httpx.Response(200, json={"candidates": []})
+
+    client = GeminiClient("k", model="m")
+    client.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    assert await client.generate("s", [], []) == {"candidates": []} and len(calls) == 2
