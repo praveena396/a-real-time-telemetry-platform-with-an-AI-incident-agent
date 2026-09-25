@@ -2,7 +2,7 @@
 
 Usage (key in the GEMINI_API_KEY environment variable):
     python -m app.agent.gemini_check
-    python -m app.agent.gemini_check gemini-3.5-flash gemini-3.5-flash
+    python -m app.agent.gemini_check gemini-3.5-flash gemini-flash-latest
 
 For each model it makes two calls: a plain prompt, then a prompt with function
 calling (which the agent needs). It prints OK or Google's own error message.
@@ -19,7 +19,7 @@ from .diagnosers import DEFAULT_GEMINI_MODEL
 from .tools import TOOL_DECLARATIONS
 
 BASE = "https://generativelanguage.googleapis.com/v1beta"
-DEFAULT_MODELS = [DEFAULT_GEMINI_MODEL, "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-2.5-flash"]
+DEFAULT_MODELS = [DEFAULT_GEMINI_MODEL, "gemini-flash-latest", "gemini-3-flash-preview", "gemini-2.5-flash"]
 
 
 def _error(r: httpx.Response) -> str:
