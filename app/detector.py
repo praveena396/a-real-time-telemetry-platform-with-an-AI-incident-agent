@@ -1,43 +1,28 @@
-"""Streaming anomaly detection using a rolling z-score per (device, metric).
-
-Only normal-looking readings update the baseline, so a fault doesn't
-teach the detector that the fault is normal.
-"""
+"""Run a streaming detector over the bus: one detector instance per (device, metric)."""
 from __future__ import annotations
 
-import math
-from collections import defaultdict, deque
+from collections.abc import Callable
 
 from .bus import EventBus, Subscription
+from .detectors import Detector, ZScore
 from .events import Anomaly, Reading
 
 
-class RollingStats:
-    def __init__(self, window: int) -> None:
-        self.buf: deque[float] = deque(maxlen=window)
-
-    def add(self, x: float) -> None:
-        self.buf.append(x)
-
-    def ready(self) -> bool:
-        return len(self.buf) >= self.buf.maxlen // 2
-
-    def z(self, x: float) -> float:
-        n = len(self.buf)
-        mean = sum(self.buf) / n
-        var = sum((v - mean) ** 2 for v in self.buf) / max(n - 1, 1)
-        return (x - mean) / (math.sqrt(var) or 1e-9)
-
-
 async def run_detector(bus: EventBus, readings: Subscription[Reading],
-                       threshold: float = 4.0, window: int = 100) -> None:
-    stats: dict[tuple[str, str], RollingStats] = defaultdict(lambda: RollingStats(window))
+                       factory: Callable[[], Detector] | None = None,
+                       on_anomaly: Callable[[Anomaly], None] | None = None) -> None:
+    factory = factory or ZScore
+    detectors: dict[tuple[str, str], Detector] = {}
     async for r in readings:
-        s = stats[(r.device_id, r.metric)]
-        if s.ready():
-            z = s.z(r.value)
-            if abs(z) >= threshold:
-                bus.publish(Anomaly(device_id=r.device_id, metric=r.metric,
-                                    value=r.value, zscore=z, fault=r.fault))
-                continue  # don't let anomalies pollute the baseline
-        s.add(r.value)
+        key = (r.device_id, r.metric)
+        det = detectors.get(key)
+        if det is None:
+            det = detectors[key] = factory()
+        score = det.observe(r.value)
+        if score is not None:
+            a = Anomaly(device_id=r.device_id, metric=r.metric, value=r.value, score=score,
+                        fault=r.fault, detector=det.name, reading_ts=r.ts)
+            if on_anomaly:
+                on_anomaly(a)
+            if not bus.closed:
+                bus.publish(a)
