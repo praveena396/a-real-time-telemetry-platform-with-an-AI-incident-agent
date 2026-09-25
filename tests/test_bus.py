@@ -1,4 +1,3 @@
-import asyncio
 
 import pytest
 
@@ -30,7 +29,7 @@ async def test_routes_by_type():
     anomalies = bus.subscribe(Anomaly)
     everything = bus.subscribe(Event)  # base class receives all subclasses
     bus.publish(reading())
-    bus.publish(Anomaly(device_id="d", metric="m", value=9.0, zscore=5.0, fault="spike"))
+    bus.publish(Anomaly(device_id="d", metric="m", value=9.0, score=5.0, fault="spike"))
     bus.close()
     assert len(await drain(readings)) == 1
     assert len(await drain(anomalies)) == 1

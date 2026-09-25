@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -23,5 +24,48 @@ class Anomaly(Event):
     device_id: str
     metric: str
     value: float
-    zscore: float
+    score: float
     fault: str | None  # carried through so we can score the detector honestly
+    detector: str = "zscore"
+    reading_ts: float | None = None  # when the triggering reading was produced
+
+
+@dataclass(frozen=True)
+class Incident(Event):
+    """A group of anomalies on one device that close together in time."""
+
+    incident_id: str
+    device_id: str
+    started: float
+    ended: float
+    anomaly_count: int
+    metrics: tuple[str, ...]
+    max_score: float
+    # Majority ground-truth label of the grouped anomalies. Used only for
+    # evaluation; the agent never sees it.
+    truth: str | None = None
+    samples: tuple[tuple[float, str, float, float], ...] = ()  # (ts, metric, value, score)
+
+
+@dataclass(frozen=True)
+class Proposal(Event):
+    """An action the incident agent proposes. Nothing runs until a human approves."""
+
+    proposal_id: str
+    incident_id: str
+    device_id: str
+    diagnosis: str
+    cause: str
+    action: str
+    params: dict[str, Any]
+    confidence: float
+    agent: str
+    status: str = "pending"
+
+
+@dataclass(frozen=True)
+class ActionExecuted(Event):
+    proposal_id: str
+    device_id: str
+    action: str
+    params: dict[str, Any]
