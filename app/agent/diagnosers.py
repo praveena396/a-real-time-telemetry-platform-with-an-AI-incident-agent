@@ -112,10 +112,10 @@ class LLMClient(Protocol):
                        tools: list[dict[str, Any]]) -> dict[str, Any]: ...
 
 
-# Google's alias for its current Flash model. Specific versions get retired
-# (they return 404), so pin one with GEMINI_MODEL only when you need
-# reproducible eval numbers, and record which one you used.
-DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
+# Verified working on a new free-tier key (Sept 2026); older versions return 404
+# and the gemini-flash-latest alias was rejected. Override with GEMINI_MODEL, and
+# check what your key can use with `python -m app.agent.gemini_check`.
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
 
 
 class GeminiAPIError(RuntimeError):
