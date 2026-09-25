@@ -25,7 +25,7 @@ class Settings:
     # agent
     agent_enabled: bool = field(default_factory=lambda: _env("AGENT_ENABLED", "1") == "1")
     gemini_api_key: str | None = field(default_factory=lambda: os.environ.get("GEMINI_API_KEY") or None)
-    gemini_model: str = field(default_factory=lambda: _env("GEMINI_MODEL", "gemini-2.5-flash"))
+    gemini_model: str = field(default_factory=lambda: _env("GEMINI_MODEL", "gemini-flash-latest"))
     agent_max_concurrency: int = field(default_factory=lambda: int(_env("AGENT_MAX_CONCURRENCY", "2")))
     # Budget on diagnoses per minute (protects LLM quota and cost).
     agent_max_per_min: int = field(default_factory=lambda: int(_env("AGENT_MAX_PER_MIN", "10")))

@@ -28,7 +28,7 @@ from ..events import Anomaly, Incident, Reading
 from ..incidents import IncidentGrouper
 from ..simulator import FaultConfig, generate
 from ..storage.base import MemoryStore, incident_row
-from .diagnosers import Diagnoser, GeminiClient, GeminiDiagnoser, HeuristicDiagnoser
+from .diagnosers import DEFAULT_GEMINI_MODEL, Diagnoser, GeminiClient, GeminiDiagnoser, HeuristicDiagnoser
 from .guardrails import EXPECTED_ACTIONS, validate_proposal
 from .tools import AgentTools
 
@@ -92,8 +92,10 @@ def _incident(d: dict[str, Any]) -> Incident:
                        "samples": tuple(tuple(s) for s in d["samples"])})
 
 
-async def replay(records: list[dict[str, Any]], diagnoser: Diagnoser, delay: float = 0.0) -> dict[str, Any]:
+async def replay(records: list[dict[str, Any]], diagnoser: Diagnoser, delay: float = 0.0,
+                 max_repeated_errors: int = 3) -> dict[str, Any]:
     confusion: Counter[tuple[str, str]] = Counter()
+    last_error, repeats, aborted = "", 0, None
     correct_dx = correct_any = correct_action = no_proposal = rejected = 0
     latencies: list[float] = []
     tool_calls: list[int] = []
@@ -108,10 +110,19 @@ async def replay(records: list[dict[str, Any]], diagnoser: Diagnoser, delay: flo
         try:
             res = await diagnoser.diagnose(inc.incident_id, AgentTools(store))
         except Exception as e:  # count API failures as misses rather than aborting the run
-            print(f"  {inc.incident_id}: diagnoser error {type(e).__name__}: {e}")
+            error = f"{type(e).__name__}: {e}"
+            print(f"  {inc.incident_id}: diagnoser error {error}")
             no_proposal += 1
             confusion[(truth, "error")] += 1
+            repeats = repeats + 1 if error == last_error else 1
+            last_error = error
+            if repeats >= max_repeated_errors:
+                # The same error every time (bad model name, bad key) won't fix itself.
+                aborted = f"stopped after {repeats} identical errors: {error}"
+                print(f"  {aborted}")
+                break
             continue
+        repeats = 0
         latencies.append(time.perf_counter() - t0)
         tool_calls.append(res.tool_calls)
         rejected += res.rejected
@@ -126,6 +137,8 @@ async def replay(records: list[dict[str, Any]], diagnoser: Diagnoser, delay: flo
         correct_action += valid.action in EXPECTED_ACTIONS.get(truth, set())
         if delay:
             await asyncio.sleep(delay)
+    if aborted:
+        return {"agent": diagnoser.name, "aborted": aborted}
     n = len(records)
     by_truth = Counter(r["incident"]["truth"] or "noise" for r in records)
     return {
@@ -166,7 +179,7 @@ def main() -> None:
         key = os.environ.get("GEMINI_API_KEY")
         if not key:
             raise SystemExit("set GEMINI_API_KEY")
-        diagnoser = GeminiDiagnoser(GeminiClient(key, os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")))
+        diagnoser = GeminiDiagnoser(GeminiClient(key, os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)))
     else:
         diagnoser = HeuristicDiagnoser()
     res = asyncio.run(replay(load(a.file, a.limit), diagnoser, a.delay))

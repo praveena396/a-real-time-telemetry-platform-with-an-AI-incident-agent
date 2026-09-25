@@ -297,3 +297,35 @@ def test_eval_dataset_is_committed_and_scores():
     recs = load(Path("evals/incidents.jsonl.gz"), limit=40)
     res = asyncio.run(replay(recs, HeuristicDiagnoser()))
     assert res["diagnosis_accuracy"] > 0.8
+
+
+@pytest.mark.asyncio
+async def test_eval_stops_after_repeated_identical_errors():
+    from pathlib import Path
+
+    class Broken:
+        name = "broken"
+        calls = 0
+
+        async def diagnose(self, incident_id, tools):
+            Broken.calls += 1
+            raise RuntimeError("model not found")
+
+    res = await replay(load(Path("evals/incidents.jsonl.gz"), limit=20), Broken())
+    assert Broken.calls == 3 and "identical errors" in res["aborted"]
+
+
+@pytest.mark.asyncio
+async def test_gemini_client_surfaces_google_error_message():
+    import httpx
+
+    from app.agent.diagnosers import GeminiAPIError, GeminiClient
+
+    def handler(request):
+        return httpx.Response(404, json={"error": {"message": "models/x is not found for API version v1beta"}})
+
+    client = GeminiClient("k", model="x")
+    client.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    with pytest.raises(GeminiAPIError, match="not found for API version"):
+        await client.generate("s", [], [])
+    assert GeminiDiagnoser(client).name == "gemini (x)"

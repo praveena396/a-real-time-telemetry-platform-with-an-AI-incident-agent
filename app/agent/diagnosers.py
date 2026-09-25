@@ -112,12 +112,26 @@ class LLMClient(Protocol):
                        tools: list[dict[str, Any]]) -> dict[str, Any]: ...
 
 
+# Google's alias for its current Flash model. Specific versions get retired
+# (they return 404), so pin one with GEMINI_MODEL only when you need
+# reproducible eval numbers, and record which one you used.
+DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
+
+
+class GeminiAPIError(RuntimeError):
+    """A non-retryable Gemini API error, carrying Google's own error message."""
+
+    def __init__(self, status: int, model: str, message: str) -> None:
+        super().__init__(f"Gemini API {status} for model {model!r}: {message}")
+        self.status = status
+
+
 class GeminiClient:
     """Minimal Gemini REST client (generateContent with function calling)."""
 
     URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
-    def __init__(self, api_key: str, model: str = "gemini-2.5-flash", timeout: float = 60.0) -> None:
+    def __init__(self, api_key: str, model: str = DEFAULT_GEMINI_MODEL, timeout: float = 60.0) -> None:
         self.model = model
         self.http = httpx.AsyncClient(timeout=timeout, headers={"x-goog-api-key": api_key})
 
@@ -132,7 +146,12 @@ class GeminiClient:
             if r.status_code in (429, 500, 503) and attempt < 3:
                 await asyncio.sleep(2 ** attempt)
                 continue
-            r.raise_for_status()
+            if r.is_error:
+                try:
+                    message = r.json()["error"]["message"]
+                except (ValueError, KeyError, TypeError):
+                    message = r.text[:300]
+                raise GeminiAPIError(r.status_code, self.model, message)
             data: dict[str, Any] = r.json()
             return data
         raise RuntimeError("unreachable")
@@ -142,6 +161,9 @@ class GeminiDiagnoser:
     name = "gemini"
 
     def __init__(self, client: LLMClient, max_turns: int = 8, max_rejections: int = 2) -> None:
+        model = getattr(client, "model", None)
+        if model:
+            self.name = f"gemini ({model})"
         self.client = client
         self.max_turns = max_turns
         self.max_rejections = max_rejections
