@@ -93,13 +93,13 @@ def _incident(d: dict[str, Any]) -> Incident:
 
 
 async def replay(records: list[dict[str, Any]], diagnoser: Diagnoser, delay: float = 0.0,
-                 max_repeated_errors: int = 3) -> dict[str, Any]:
+                 max_repeated_errors: int = 3, progress: bool = False) -> dict[str, Any]:
     confusion: Counter[tuple[str, str]] = Counter()
     last_error, repeats, aborted = "", 0, None
     correct_dx = correct_any = correct_action = no_proposal = rejected = 0
     latencies: list[float] = []
     tool_calls: list[int] = []
-    for rec in records:
+    for i, rec in enumerate(records, 1):
         store = MemoryStore()
         inc = _incident(rec["incident"])
         await store.write_readings([Reading(device_id=inc.device_id, metric=METRICS[m], value=v, ts=ts)
@@ -132,6 +132,9 @@ async def replay(records: list[dict[str, Any]], diagnoser: Diagnoser, delay: flo
             confusion[(truth, "none")] += 1
             continue
         confusion[(truth, valid.diagnosis)] += 1
+        if progress:
+            print(f"  [{i}/{len(records)}] {inc.incident_id}: {valid.diagnosis} -> {valid.action} "
+                  f"(truth: {truth}, {time.perf_counter() - t0:.1f}s)", flush=True)
         correct_dx += valid.diagnosis == truth
         correct_any += valid.diagnosis in (inc.labels or ("noise",))
         correct_action += valid.action in EXPECTED_ACTIONS.get(truth, set())
@@ -169,6 +172,8 @@ def main() -> None:
     e.add_argument("--agent", choices=["heuristic", "gemini"], default="heuristic")
     e.add_argument("--limit", type=int)
     e.add_argument("--delay", type=float, default=0.0, help="seconds between incidents (API rate limits)")
+    e.add_argument("--rpm", type=float, default=float(os.environ.get("GEMINI_RPM", "8")),
+                   help="max Gemini requests per minute (free-tier keys allow only a few)")
     e.add_argument("--json", action="store_true")
     a = p.parse_args()
     if a.cmd == "record":
@@ -179,10 +184,11 @@ def main() -> None:
         key = os.environ.get("GEMINI_API_KEY")
         if not key:
             raise SystemExit("set GEMINI_API_KEY")
-        diagnoser = GeminiDiagnoser(GeminiClient(key, os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)))
+        diagnoser = GeminiDiagnoser(GeminiClient(key, os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
+                                                 max_rpm=a.rpm))
     else:
         diagnoser = HeuristicDiagnoser()
-    res = asyncio.run(replay(load(a.file, a.limit), diagnoser, a.delay))
+    res = asyncio.run(replay(load(a.file, a.limit), diagnoser, a.delay, progress=a.agent == "gemini"))
     if a.json:
         print(json.dumps(res, indent=2))
     else:

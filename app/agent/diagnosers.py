@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Any, Protocol
 
 import httpx
@@ -131,9 +132,34 @@ class GeminiClient:
 
     URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
-    def __init__(self, api_key: str, model: str = DEFAULT_GEMINI_MODEL, timeout: float = 60.0) -> None:
+    def __init__(self, api_key: str, model: str = DEFAULT_GEMINI_MODEL, timeout: float = 60.0,
+                 max_rpm: float | None = None, max_attempts: int = 6) -> None:
         self.model = model
         self.http = httpx.AsyncClient(timeout=timeout, headers={"x-goog-api-key": api_key})
+        # Free-tier keys allow only a few requests per minute, and one incident
+        # takes several calls, so space calls out instead of bursting.
+        self.min_interval = 60.0 / max_rpm if max_rpm else 0.0
+        self.max_attempts = max_attempts
+        self._last_call = 0.0
+        self._lock = asyncio.Lock()
+
+    async def _pace(self) -> None:
+        async with self._lock:
+            wait = self._last_call + self.min_interval - time.monotonic()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_call = time.monotonic()
+
+    @staticmethod
+    def _retry_after(r: httpx.Response, attempt: int) -> float:
+        """How long to wait before retrying: Google's RetryInfo delay if given, else exponential."""
+        try:
+            for d in r.json()["error"].get("details", []):
+                if str(d.get("@type", "")).endswith("RetryInfo") and "retryDelay" in d:
+                    return min(float(str(d["retryDelay"]).rstrip("s")) + 1.0, 120.0)
+        except (ValueError, KeyError, TypeError, AttributeError):
+            pass
+        return min(2.0 ** (attempt + 1), 60.0)
 
     async def generate(self, system: str, contents: list[dict[str, Any]],
                        tools: list[dict[str, Any]]) -> dict[str, Any]:
@@ -141,10 +167,13 @@ class GeminiClient:
                 "tools": [{"functionDeclarations": tools}],
                 "toolConfig": {"functionCallingConfig": {"mode": "ANY"}},
                 "generationConfig": {"temperature": 0}}
-        for attempt in range(4):
+        for attempt in range(self.max_attempts):
+            await self._pace()
             r = await self.http.post(self.URL.format(model=self.model), json=body)
-            if r.status_code in (429, 500, 503) and attempt < 3:
-                await asyncio.sleep(2 ** attempt)
+            if r.status_code in (429, 500, 503) and attempt < self.max_attempts - 1:
+                wait = self._retry_after(r, attempt)
+                log.warning("Gemini %s; retrying in %.0fs", r.status_code, wait)
+                await asyncio.sleep(wait)
                 continue
             if r.is_error:
                 try:

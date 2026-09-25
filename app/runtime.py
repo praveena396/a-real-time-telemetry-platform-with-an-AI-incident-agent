@@ -84,7 +84,8 @@ class Pipeline:
         s = self.settings
         if s.gemini_api_key:
             log.info("incident agent: Gemini (%s)", s.gemini_model)
-            return GeminiDiagnoser(GeminiClient(s.gemini_api_key, s.gemini_model))
+            return GeminiDiagnoser(GeminiClient(s.gemini_api_key, s.gemini_model,
+                                                max_rpm=s.gemini_rpm))
         log.info("incident agent: heuristic (set GEMINI_API_KEY to use the LLM)")
         return HeuristicDiagnoser()
 

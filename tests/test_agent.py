@@ -329,3 +329,45 @@ async def test_gemini_client_surfaces_google_error_message():
     with pytest.raises(GeminiAPIError, match="not found for API version"):
         await client.generate("s", [], [])
     assert GeminiDiagnoser(client).name == "gemini (x)"
+
+
+@pytest.mark.asyncio
+async def test_gemini_client_waits_as_long_as_google_asks_on_429(monkeypatch):
+    import httpx
+
+    from app.agent import diagnosers
+    from app.agent.diagnosers import GeminiClient
+
+    calls = []
+    slept = []
+
+    def handler(request):
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(429, json={"error": {"message": "quota", "details": [
+                {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "7s"}]}})
+        return httpx.Response(200, json={"candidates": []})
+
+    async def fake_sleep(s):
+        slept.append(s)
+
+    monkeypatch.setattr(diagnosers.asyncio, "sleep", fake_sleep)
+    client = GeminiClient("k", model="m", max_rpm=60)
+    client.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    assert await client.generate("s", [], []) == {"candidates": []}
+    assert len(calls) == 2 and 8.0 in slept  # Google's 7 s plus 1 s margin
+
+
+@pytest.mark.asyncio
+async def test_gemini_client_paces_requests():
+    import httpx
+
+    from app.agent.diagnosers import GeminiClient
+
+    client = GeminiClient("k", model="m", max_rpm=600)  # at most one call per 0.1 s
+    client.http = httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, json={"candidates": []})))
+    t0 = asyncio.get_running_loop().time()
+    for _ in range(3):
+        await client.generate("s", [], [])
+    assert asyncio.get_running_loop().time() - t0 >= 0.19
