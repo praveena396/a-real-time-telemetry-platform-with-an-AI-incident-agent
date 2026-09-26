@@ -92,6 +92,11 @@ cd dashboard && npm install && npm run dev               # http://localhost:5173
 - **Read-only tools** return compact summaries (mean, std, slope, longest flat run, about 40 sampled
   points) instead of raw rows, which is cheaper and easier for the model to reason over. Ground-truth labels
   are stripped.
+- **Context pre-loading.** The agent gathers the incident and the before/during summaries itself and sends
+  them in the first message, so the model usually answers in **one request** instead of about four (it can
+  still call tools if it needs more). A free-tier key allows only about 20 requests a day for the model, so
+  this is the difference between about 4 and about 20 diagnosed incidents a day, and it cuts latency too.
+  `--no-preload` runs the original tool-by-tool loop for comparison.
 - **Guardrails:**
   - strict schema (pydantic, `extra="forbid"`)
   - action allowlist with exact parameters

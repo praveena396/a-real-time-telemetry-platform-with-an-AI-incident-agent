@@ -27,11 +27,12 @@ log = logging.getLogger(__name__)
 
 class DiagnosisResult:
     def __init__(self, raw: dict[str, Any] | None, rejected: int = 0, tool_calls: int = 0,
-                 errors: list[str] | None = None) -> None:
+                 errors: list[str] | None = None, llm_calls: int = 0) -> None:
         self.raw = raw
         self.rejected = rejected      # proposals the guardrails bounced during the loop
         self.tool_calls = tool_calls
         self.errors = errors or []
+        self.llm_calls = llm_calls    # requests sent to the model (what quotas and cost count)
 
 
 class Diagnoser(Protocol):
@@ -106,6 +107,17 @@ Process:
    and a confidence between 0 and 1. recalibrate_sensor and increase_monitoring need params {"metric": ...};
    all other actions need params {}.
 A human reviews every proposal before anything runs. Never invent data you did not retrieve."""
+
+PRELOADED_PROCESS = """
+The user message already contains the incident and, for each involved metric, summaries of the ~20 s
+before the incident (baseline) and of the incident window. Compare mean, slope_per_s and longest_flat_run
+against the baseline, then call propose_action. Call query_readings only if the evidence is genuinely
+insufficient."""
+
+# Same role and fault definitions; the data-gathering steps are replaced by pre-loaded context.
+SYSTEM_PROMPT_PRELOADED = SYSTEM_PROMPT.split("\nProcess:")[0] + PRELOADED_PROCESS + """
+Rules: ONE allowed action; recalibrate_sensor and increase_monitoring need params {"metric": ...}, all other
+actions need params {}; confidence between 0 and 1. A human reviews every proposal before anything runs."""
 
 
 class LLMClient(Protocol):
@@ -195,26 +207,53 @@ class GeminiClient:
 class GeminiDiagnoser:
     name = "gemini"
 
-    def __init__(self, client: LLMClient, max_turns: int = 8, max_rejections: int = 2) -> None:
+    def __init__(self, client: LLMClient, max_turns: int = 8, max_rejections: int = 2,
+                 preload: bool = True) -> None:
         model = getattr(client, "model", None)
         if model:
             self.name = f"gemini ({model})"
         self.client = client
         self.max_turns = max_turns
         self.max_rejections = max_rejections
+        # Pre-loading the evidence lets the model answer in one request instead of
+        # fetching it step by step (~4 requests), which matters on rate-limited keys.
+        self.preload = preload
+
+    @staticmethod
+    async def build_context(incident_id: str, tools: AgentTools) -> dict[str, Any]:
+        """The evidence the model would otherwise fetch itself, gathered up front."""
+        inc = await tools.get_incident(incident_id)
+        t0, t1 = inc["started"], inc["ended"]
+        readings = {}
+        for metric in inc["metrics"]:
+            readings[metric] = {
+                "baseline_20s_before": await tools.query_readings(inc["device_id"], metric, t0 - 20, t0 - 0.05, 20),
+                "during_incident": await tools.query_readings(inc["device_id"], metric, t0 - 0.05, t1 + 0.05, 30),
+            }
+        inc["samples"] = inc.get("samples", [])[:20]
+        return {"incident": inc, "readings": readings}
 
     async def diagnose(self, incident_id: str, tools: AgentTools) -> DiagnosisResult:
         incident = await tools.store.get_incident(incident_id)
-        contents: list[dict[str, Any]] = [
-            {"role": "user", "parts": [{"text": f"Investigate incident {incident_id} and propose an action."}]}]
-        rejected = calls = 0
+        if self.preload:
+            system = SYSTEM_PROMPT_PRELOADED
+            context = await self.build_context(incident_id, tools)
+            prompt = (f"Incident {incident_id}. Evidence (JSON):\n{json.dumps(context, default=str)}\n\n"
+                      "Diagnose it and call propose_action.")
+        else:
+            system = SYSTEM_PROMPT
+            prompt = f"Investigate incident {incident_id} and propose an action."
+        contents: list[dict[str, Any]] = [{"role": "user", "parts": [{"text": prompt}]}]
+        rejected = calls = llm_calls = 0
         errors: list[str] = []
         for _ in range(self.max_turns):
-            resp = await self.client.generate(SYSTEM_PROMPT, contents, TOOL_DECLARATIONS)
+            llm_calls += 1
+            resp = await self.client.generate(system, contents, TOOL_DECLARATIONS)
             try:
                 content = resp["candidates"][0]["content"]
             except (KeyError, IndexError):
-                return DiagnosisResult(None, rejected, calls, [f"no candidate in response: {json.dumps(resp)[:200]}"])
+                return DiagnosisResult(None, rejected, calls, [f"no candidate in response: {json.dumps(resp)[:200]}"],
+                                       llm_calls)
             contents.append({"role": "model", "parts": content.get("parts", [])})
             fcalls = [p["functionCall"] for p in content.get("parts", []) if "functionCall" in p]
             if not fcalls:
@@ -228,17 +267,17 @@ class GeminiDiagnoser:
                     args.setdefault("params", {})
                     _, errs = validate_proposal(args, incident)
                     if not errs:
-                        return DiagnosisResult(args, rejected, calls, errors)
+                        return DiagnosisResult(args, rejected, calls, errors, llm_calls)
                     rejected += 1
                     errors.extend(errs)
                     if rejected > self.max_rejections:
-                        return DiagnosisResult(None, rejected, calls, errors)
+                        return DiagnosisResult(None, rejected, calls, errors, llm_calls)
                     result: dict[str, Any] = {"accepted": False, "errors": errs}
                 else:
                     result = await self._call_tool(tools, name, args)
                 responses.append({"functionResponse": {"name": name, "response": {"result": result}}})
             contents.append({"role": "user", "parts": responses})
-        return DiagnosisResult(None, rejected, calls, [*errors, "max turns reached without a proposal"])
+        return DiagnosisResult(None, rejected, calls, [*errors, "max turns reached without a proposal"], llm_calls)
 
     @staticmethod
     async def _call_tool(tools: AgentTools, name: str | None, args: dict[str, Any]) -> dict[str, Any]:

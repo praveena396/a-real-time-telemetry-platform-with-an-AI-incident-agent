@@ -390,3 +390,51 @@ async def test_gemini_client_retries_timeouts():
     client = GeminiClient("k", model="m")
     client.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     assert await client.generate("s", [], []) == {"candidates": []} and len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_gemini_preload_answers_in_one_llm_call():
+    store, _ = await seeded_store("drift")
+    llm = FakeLLM([[("propose_action", good())]])
+    res = await GeminiDiagnoser(llm, preload=True).diagnose("inc-1", AgentTools(store))
+    assert res.raw["action"] == "recalibrate_sensor" and res.llm_calls == 1
+    prompt = llm.seen[0]["parts"][0]["text"]
+    # the evidence is in the prompt, and the ground truth is not
+    assert "baseline_20s_before" in prompt and "slope_per_s" in prompt
+    assert '"truth"' not in prompt and '"labels"' not in prompt and '"fault"' not in prompt
+
+
+@pytest.mark.asyncio
+async def test_gemini_tool_mode_still_fetches_evidence_itself():
+    store, _ = await seeded_store("drift")
+    llm = FakeLLM([
+        [("get_incident", {"incident_id": "inc-1"})],
+        [("propose_action", good())],
+    ])
+    res = await GeminiDiagnoser(llm, preload=False).diagnose("inc-1", AgentTools(store))
+    assert res.raw is not None and res.llm_calls == 2
+    assert "baseline_20s_before" not in llm.seen[0]["parts"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_eval_treats_errors_differing_only_in_numbers_as_identical():
+    from pathlib import Path
+
+    class Quota:
+        name = "quota"
+        calls = 0
+
+        async def diagnose(self, incident_id, tools):
+            Quota.calls += 1
+            raise RuntimeError(f"429 quota exceeded, retry in {50 + Quota.calls * 1.37:.2f}s")
+
+    res = await replay(load(Path("evals/incidents.jsonl.gz"), limit=20), Quota())
+    assert Quota.calls == 3 and "aborted" in res
+
+
+def test_eval_load_offset():
+    from pathlib import Path
+
+    first = load(Path("evals/incidents.jsonl.gz"), limit=3)
+    shifted = load(Path("evals/incidents.jsonl.gz"), limit=2, offset=1)
+    assert [r["incident"]["incident_id"] for r in shifted] == [r["incident"]["incident_id"] for r in first[1:]]

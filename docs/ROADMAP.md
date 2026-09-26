@@ -35,7 +35,9 @@ Work through this list in order.
 
 ## Phase 6: LLM incident agent (done). Your task: get the real LLM numbers
 - [ ] Get a free Gemini API key (Google AI Studio). Put it in `.env` as `GEMINI_API_KEY`.
-- [ ] `python -m app.agent.eval run --agent gemini --limit 60 --delay 5` (the delay respects free-tier rate limits).
+- [ ] `python -m app.agent.eval run --agent gemini --limit 15` today, then `--limit 15 --offset 15` tomorrow, and so on.
+      A free-tier key allows about 20 requests a day for the model; with pre-loading, one incident is usually one request.
+- [ ] Compare: `--limit 5 --no-preload` shows the tool-by-tool loop's `mean_llm_calls` (about 4) against pre-loading (about 1).
 - [ ] Add the Gemini row to the eval table: diagnosis accuracy, correct action, validation rejections, latency.
       Whether the LLM beats the heuristic baseline or not, it's a finding. Report it honestly.
 - [ ] Connect the MCP server to Claude Desktop or Claude Code and investigate an incident through it:
