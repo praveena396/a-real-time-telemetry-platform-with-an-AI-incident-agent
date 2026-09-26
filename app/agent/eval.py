@@ -17,6 +17,7 @@ import asyncio
 import gzip
 import json
 import os
+import re
 import statistics
 import time
 from collections import Counter, defaultdict, deque
@@ -81,9 +82,10 @@ def record(out: Path, devices: int, steps: int, seed: int, detector: str = "hybr
     return n
 
 
-def load(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
+def load(path: Path, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
     with _open(path, "r") as f:
         rows = [json.loads(line) for line in f if line.strip()]
+    rows = rows[offset:]
     return rows[:limit] if limit else rows
 
 
@@ -99,6 +101,7 @@ async def replay(records: list[dict[str, Any]], diagnoser: Diagnoser, delay: flo
     correct_dx = correct_any = correct_action = no_proposal = rejected = 0
     latencies: list[float] = []
     tool_calls: list[int] = []
+    llm_calls: list[int] = []
     for i, rec in enumerate(records, 1):
         store = MemoryStore()
         inc = _incident(rec["incident"])
@@ -114,8 +117,10 @@ async def replay(records: list[dict[str, Any]], diagnoser: Diagnoser, delay: flo
             print(f"  {inc.incident_id}: diagnoser error {error}")
             no_proposal += 1
             confusion[(truth, "error")] += 1
-            repeats = repeats + 1 if error == last_error else 1
-            last_error = error
+            # Compare errors ignoring numbers: quota errors differ only in "retry in 58.65s".
+            shape = re.sub(r"\d+(\.\d+)?", "#", error)
+            repeats = repeats + 1 if shape == last_error else 1
+            last_error = shape
             if repeats >= max_repeated_errors:
                 # The same error every time (bad model name, bad key) won't fix itself.
                 aborted = f"stopped after {repeats} identical errors: {error}"
@@ -125,6 +130,8 @@ async def replay(records: list[dict[str, Any]], diagnoser: Diagnoser, delay: flo
         repeats = 0
         latencies.append(time.perf_counter() - t0)
         tool_calls.append(res.tool_calls)
+        if res.llm_calls:
+            llm_calls.append(res.llm_calls)
         rejected += res.rejected
         valid, _ = validate_proposal(res.raw, await store.get_incident(inc.incident_id)) if res.raw else (None, [])
         if valid is None:
@@ -155,6 +162,7 @@ async def replay(records: list[dict[str, Any]], diagnoser: Diagnoser, delay: flo
         "mean_latency_ms": round(statistics.mean(latencies) * 1000, 1) if latencies else None,
         "p95_latency_ms": round(sorted(latencies)[int(0.95 * (len(latencies) - 1))] * 1000, 1) if latencies else None,
         "mean_tool_calls": round(statistics.mean(tool_calls), 2) if tool_calls else None,
+        "mean_llm_calls": round(statistics.mean(llm_calls), 2) if llm_calls else None,
         "confusion": {f"{t}->{p}": c for (t, p), c in sorted(confusion.items())},
     }
 
@@ -171,6 +179,10 @@ def main() -> None:
     e.add_argument("--file", type=Path, default=Path("evals/incidents.jsonl.gz"))
     e.add_argument("--agent", choices=["heuristic", "gemini"], default="heuristic")
     e.add_argument("--limit", type=int)
+    e.add_argument("--offset", type=int, default=0,
+                   help="skip the first N incidents (e.g. run 20 per day on a free-tier key)")
+    e.add_argument("--no-preload", action="store_true",
+                   help="let the model fetch evidence with tools instead of pre-loading it (more LLM calls)")
     e.add_argument("--delay", type=float, default=0.0, help="seconds between incidents (API rate limits)")
     e.add_argument("--rpm", type=float, default=float(os.environ.get("GEMINI_RPM", "8")),
                    help="max Gemini requests per minute (free-tier keys allow only a few)")
@@ -185,10 +197,10 @@ def main() -> None:
         if not key:
             raise SystemExit("set GEMINI_API_KEY")
         diagnoser = GeminiDiagnoser(GeminiClient(key, os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
-                                                 max_rpm=a.rpm))
+                                                 max_rpm=a.rpm), preload=not a.no_preload)
     else:
         diagnoser = HeuristicDiagnoser()
-    res = asyncio.run(replay(load(a.file, a.limit), diagnoser, a.delay, progress=a.agent == "gemini"))
+    res = asyncio.run(replay(load(a.file, a.limit, a.offset), diagnoser, a.delay, progress=a.agent == "gemini"))
     if a.json:
         print(json.dumps(res, indent=2))
     else:
